@@ -53,6 +53,13 @@ pub fn Header() -> impl IntoView {
         }
     };
 
+    // Built outside the view! macro: its parser takes an attribute value as a
+    // single expression, not a multi-line method chain.
+    let theater_options: Vec<SelectOption<TheaterId>> = TheaterId::ALL
+        .iter()
+        .map(|t| SelectOption { key: *t, label: t.theater().label })
+        .collect();
+
     view! {
         <header class="hud-header">
             <div class="logo">
@@ -90,10 +97,7 @@ pub fn Header() -> impl IntoView {
                 // the theater signal; the map owns everything that follows.
                 <TacticalSelect
                     label="THEATER"
-                    options=TheaterId::ALL
-                        .iter()
-                        .map(|t| SelectOption { key: *t, label: t.theater().label })
-                        .collect::<Vec<_>>()
+                    options=theater_options
                     value=state.selected_theater
                     tone=SelectTone::Danger
                 />

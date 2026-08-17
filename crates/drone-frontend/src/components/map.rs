@@ -549,7 +549,10 @@ pub fn MapPanel() -> impl IntoView {
                         return;
                     }
                     let pos = positions.borrow();
-                    for e in events.iter().filter(|e| !seen.contains(&e.id)) {
+                    // Collect first, then insert: filtering on `seen` while
+                    // inserting into it is a simultaneous shared+mutable borrow.
+                    let fresh: Vec<_> = events.iter().filter(|e| !seen.contains(&e.id)).cloned().collect();
+                    for e in &fresh {
                         seen.insert(e.id);
                         if let Some((_, lat, lng, hdg)) = pos.iter().find(|(cs, ..)| cs == &e.callsign) {
                             // 6-14 km ahead of the airframe, hashed off the id so
