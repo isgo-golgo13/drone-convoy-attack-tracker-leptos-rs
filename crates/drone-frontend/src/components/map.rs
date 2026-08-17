@@ -631,19 +631,31 @@ pub fn MapPanel() -> impl IntoView {
                         <span class="status-dot nominal"></span>
                         {move || state.selected_theater.get().theater().aor}
                     </div>
+                    // Tasking in flight: the selector issued an order and the
+                    // convoy has not reported from the new theater yet. Purely
+                    // a transition state -- clears itself when the server's
+                    // positions land in the viewed theater. No operator
+                    // action is ever required from here: the UI is the
+                    // commander, the record is the truth, the sim obeys.
                     {move || {
                         let viewed = state.selected_theater.get();
-                        flown_theater(&state.drones.get())
-                            .filter(|f| *f != viewed)
-                            .map(|f| view! {
-                                <div class="map-hud-row warn">
-                                    <div class="warn-line">
-                                        <span class="status-dot warning"></span>
-                                        {format!("NO AIRFRAMES — SIM FLYING {}", f.theater().label)}
-                                    </div>
-                                    <code>{format!("make run-simulator THEATER={}", viewed.slug())}</code>
-                                </div>
-                            })
+                        let flown = flown_theater(&state.drones.get());
+                        if flown == Some(viewed) && state.retasking.get_untracked().is_some() {
+                            state.retasking.set(None);
+                        }
+                        let pending = state.retasking.get().is_some()
+                            || matches!(flown, Some(f) if f != viewed);
+                        let label = match flown {
+                            Some(f) if f != viewed =>
+                                format!("RETASKING — CONVOY EN ROUTE FROM {}", f.theater().label),
+                            _ => "RETASKING — AWAITING CONVOY".to_string(),
+                        };
+                        pending.then(|| view! {
+                            <div class="map-hud-row retask">
+                                <span class="status-dot warning pulse"></span>
+                                {label}
+                            </div>
+                        })
                     }}
                 </div>
                 {move || drone_position().map(|pos| view! {

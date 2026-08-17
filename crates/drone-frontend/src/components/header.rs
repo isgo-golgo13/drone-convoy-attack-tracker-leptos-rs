@@ -60,6 +60,33 @@ pub fn Header() -> impl IntoView {
         .map(|t| SelectOption { key: *t, label: t.theater().label })
         .collect();
 
+    // THE SELECTOR IS THE COMMANDER. Every change issues a tasking order to
+    // the convoy record; the simulator (or a live ground station) obeys it.
+    // The map view follows the selector immediately; the airframes follow
+    // the record within a few ticks. Skips the initial value (page load is
+    // not an order) and any change while no convoy is selected.
+    {
+        let primed = StoredValue::new(false);
+        Effect::new(move |_| {
+            let theater = state.selected_theater.get();
+            if !primed.get_value() {
+                primed.set_value(true);
+                return;
+            }
+            let Some(convoy_id) = state.selected_convoy.get_untracked() else { return };
+            state.retasking.set(Some(theater));
+            leptos::task::spawn_local(async move {
+                match crate::services::retask_convoy(convoy_id, theater.slug()).await {
+                    Ok(()) => log::info!("retask -> {}", theater.slug()),
+                    Err(e) => {
+                        log::error!("retask failed: {e}");
+                        state.retasking.set(None);
+                    }
+                }
+            });
+        });
+    }
+
     view! {
         <header class="hud-header">
             <div class="logo">

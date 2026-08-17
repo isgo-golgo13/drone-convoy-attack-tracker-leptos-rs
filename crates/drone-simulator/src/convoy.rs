@@ -117,12 +117,19 @@ impl ConvoySimulator {
     /// Override with DRONE_CONVOY_ID once the convoy repository is wired up.
     pub const DEMO_CONVOY_ID: &'static str = "550e8400-e29b-41d4-a716-446655440000";
 
-    pub fn new(callsign: &str, mission_type: &str, drone_count: usize, theater: drone_domain::TheaterId) -> Self {
-        let convoy_id = std::env::var("DRONE_CONVOY_ID")
+    /// The convoy id this process flies: DRONE_CONVOY_ID if set and valid,
+    /// else the well-known demo id. Factored out so the service can read the
+    /// convoy's tasking order BEFORE constructing a convoy for it.
+    pub fn resolve_convoy_id() -> Uuid {
+        std::env::var("DRONE_CONVOY_ID")
             .ok()
             .and_then(|raw| Uuid::parse_str(&raw).ok())
             .or_else(|| Uuid::parse_str(Self::DEMO_CONVOY_ID).ok())
-            .unwrap_or_else(Uuid::new_v4);
+            .unwrap_or_else(Uuid::new_v4)
+    }
+
+    pub fn new(callsign: &str, mission_type: &str, drone_count: usize, theater: drone_domain::TheaterId) -> Self {
+        let convoy_id = Self::resolve_convoy_id();
         let mut drones = HashMap::new();
 
         // Generate drones with military callsigns

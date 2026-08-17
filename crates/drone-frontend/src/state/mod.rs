@@ -28,6 +28,11 @@ pub struct AppState {
     /// poll; the display glides between fixes — exactly what a real GPS/INS
     /// display does. Never invented: with a single fix it holds that fix.
     pub live_positions: RwSignal<HashMap<Uuid, LivePosition>>,
+    /// A tasking order is in flight: the selector chose this theater and the
+    /// convoy record has been (or is being) updated, but the airframes have
+    /// not yet reported from there. Cleared by the map when the server's
+    /// positions arrive in the new theater. Drives the RETASKING indicator.
+    pub retasking: RwSignal<Option<crate::components::regions::TheaterId>>,
     pub ws_connected: RwSignal<bool>,
     pub mission_start: RwSignal<Option<DateTime<Utc>>>,
     pub alerts: RwSignal<Vec<Alert>>,
@@ -44,6 +49,7 @@ impl AppState {
             telemetry_series: RwSignal::new(Vec::new()),
             selected_theater: RwSignal::new(crate::components::regions::TheaterId::default()),
             live_positions: RwSignal::new(HashMap::new()),
+            retasking: RwSignal::new(None),
             ws_connected: RwSignal::new(false),
             mission_start: RwSignal::new(None),
             alerts: RwSignal::new(Vec::new()),

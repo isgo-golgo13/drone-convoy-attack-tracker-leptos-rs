@@ -1035,6 +1035,24 @@ impl ScyllaConvoyRepository {
             .await?;
         Ok(())
     }
+
+    /// Retask a convoy to a new area of responsibility.
+    ///
+    /// This is the TASKING ORDER: the dashboard writes it, whatever flies
+    /// the drones reads it. `aor_name` carries the theater slug (the shared
+    /// `drone_domain::theaters` table is the vocabulary); `aor_center` is
+    /// the theater centre. Both columns already exist -- no schema change.
+    /// Also bumps `updated_at` so any watcher can cheaply detect the change.
+    pub async fn retask(&self, convoy_id: Uuid, aor_name: &str, aor_center: &Coordinates) -> Result<()> {
+        self.client
+            .session
+            .query_unpaged(
+                "UPDATE convoys SET aor_name = ?, aor_center = ?, updated_at = ? WHERE convoy_id = ?",
+                (aor_name, CoordinatesUdt::from(aor_center.clone()), ts(Utc::now()), convoy_id),
+            )
+            .await?;
+        Ok(())
+    }
 }
 
 // =============================================================================

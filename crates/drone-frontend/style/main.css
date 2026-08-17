@@ -525,19 +525,13 @@ body {
 }
 .map-hud-row { display: flex; align-items: center; gap: 8px; padding: 7px 11px; }
 .map-hud-row.aor { color: var(--text-primary); font-weight: 600; white-space: nowrap; }
-.map-hud-row.warn {
-    flex-direction: column; align-items: stretch; gap: 6px;
+.map-hud-row.retask {
     border-top: 1px solid rgba(255, 170, 40, 0.45);
-    background: rgba(255, 170, 40, 0.10); color: #ffb437;
-    text-shadow: 0 0 6px rgba(255, 170, 40, 0.35);
+    background: rgba(255, 170, 40, 0.10); color: #ffb437; font-weight: 600;
+    text-shadow: 0 0 6px rgba(255, 170, 40, 0.35); white-space: nowrap;
 }
-.map-hud-row.warn .warn-line { display: flex; align-items: center; gap: 8px; font-weight: 600; line-height: 1.25; }
-.map-hud-row.warn code {
-    display: block; font-family: inherit; text-transform: none; letter-spacing: 0.02em;
-    background: rgba(0,0,0,0.6); border: 1px solid rgba(255,170,40,0.4);
-    color: #ffd27a; padding: 4px 8px; border-radius: var(--radius-sm);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
+.status-dot.pulse { animation: dot-pulse 1.2s ease-in-out infinite; }
+@keyframes dot-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 
 /* GPS readout on drone cards: server-anchored, smoothed between polls */
 .drone-gps {

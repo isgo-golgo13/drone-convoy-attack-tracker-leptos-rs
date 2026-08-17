@@ -115,12 +115,22 @@ NC := \033[0m
 
 .PHONY: serve
 serve: deps-up
-	@printf "$(CYAN)▶ Starting API (release) and frontend dev server natively...$(NC)\n"
+	@printf "$(CYAN)▶ Starting API (release), frontend dev server and the convoy service...$(NC)\n"
 	@printf "$(GREEN)  Dashboard          http://localhost:3000$(NC)\n"
 	@printf "$(GREEN)  GraphQL playground http://localhost:8080/graphql$(NC)\n"
-	@printf "$(YELLOW)  Ctrl-C stops both. 'make stop' stops ScyllaDB and Redis.$(NC)\n"
+	@printf "$(GREEN)  Convoy service     flies sorties back-to-back; the dashboard's THEATER selector retasks it$(NC)\n"
+	@printf "$(YELLOW)  Ctrl-C stops all three. 'make stop' stops ScyllaDB and Redis. SIM=0 to run without the service.$(NC)\n"
 	@echo ""
-	@$(MAKE) --no-print-directory -j2 serve-api serve-frontend
+	@$(MAKE) --no-print-directory -j3 serve-api serve-frontend $(if $(filter 0,$(SIM)),,serve-sim)
+
+# The convoy service: the simulator in --service mode. It waits for the API,
+# flies sorties back to back, and obeys tasking orders from the convoy record
+# (the dashboard writes them via retaskConvoy). One process, no flags after
+# `make serve`. THEATER only seeds the FIRST sortie when the record has no
+# tasking yet; the dashboard is the commander from then on.
+.PHONY: serve-sim
+serve-sim:
+	@DRONE_SERVICE=1 DRONE_THEATER=$(THEATER) $(CARGO) run --release --package drone-simulator
 
 .PHONY: serve-api
 serve-api:
@@ -337,14 +347,15 @@ run-api-release: build-api
 	@printf "$(CYAN)▶ Starting GraphQL API (release)...$(NC)\n"
 	@$(TARGET_DIR)/release/drone-api
 
-# Which theater the convoy flies. Must match the dashboard's THEATER selector
-# for airframes to sit on the pins (the map warns if they differ).
-#   make run-simulator THEATER=iraq
+# Theater that SEEDS the convoy service's first sortie when the convoy record
+# carries no tasking yet. After that the dashboard's THEATER selector is the
+# commander (retaskConvoy) and this value is ignored. Also the theater for a
+# manual `make run-simulator` sortie.
 THEATER ?= afghanistan
 
 .PHONY: run-simulator
-run-simulator:
-	@printf "$(CYAN)▶ Starting Drone Simulator ($(THEATER))...$(NC)\n"
+run-simulator:  ## single manual sortie (dev). `make serve` already runs the convoy service.
+	@printf "$(CYAN)▶ Starting Drone Simulator — single sortie ($(THEATER))...$(NC)\n"
 	@DRONE_THEATER=$(THEATER) $(CARGO) run --package drone-simulator
 
 .PHONY: run-simulator-release
