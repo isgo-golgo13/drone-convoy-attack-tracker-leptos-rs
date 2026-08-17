@@ -65,7 +65,7 @@ struct Args {
     /// sortie. A change mid-sortie retasks immediately (the convoy is
     /// re-flown from the new theater's IP) rather than waiting for the end.
     #[arg(long, env = "DRONE_TASKING_POLL_TICKS", default_value = "3")]
-    tasking_poll_ticks: u64,
+    tasking_poll_ticks: u32,
 
     /// Accept self-signed TLS (also DRONE_INSECURE_TLS=1). For KinD, where the
     /// Gateway certificate comes from a self-signed ClusterIssuer. Never in prod.
