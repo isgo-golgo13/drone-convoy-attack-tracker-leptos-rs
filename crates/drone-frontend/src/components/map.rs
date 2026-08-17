@@ -618,6 +618,25 @@ pub fn MapPanel() -> impl IntoView {
         })
     };
 
+    // The ALT/HDG readout tracks the SELECTED drone, or the convoy LEAD when
+    // nothing is selected -- so it is never blank. Values come from the
+    // smoothed live fixes (same source as the GPS row and airframe heading),
+    // falling back to the last polled position before the first fix lands.
+    // Returns (callsign, altitude_m, heading_deg).
+    let readout = move || -> Option<(String, f64, f32)> {
+        let drones = state.drones.get();
+        let live = state.live_positions.get();
+        let target = selected_drone().and_then(|id| drones.get(&id).cloned()).or_else(|| {
+            // Lead = lowest callsign (ALPHA-01); stable regardless of HashMap order.
+            drones.values().min_by(|a, b| a.callsign.cmp(&b.callsign)).cloned()
+        })?;
+        let (alt, hdg) = live
+            .get(&target.drone_id)
+            .map(|p| (p.altitude_m, p.heading_deg))
+            .unwrap_or((target.position.altitude_m, target.position.heading_deg));
+        Some((target.callsign, alt, hdg))
+    };
+
     view! {
         <div class="map-container">
             <div id=map_id class="leaflet-map"></div>
@@ -673,12 +692,18 @@ pub fn MapPanel() -> impl IntoView {
             </div>
 
             <div style="position: absolute; bottom: 16px; right: 16px; z-index: 1000;">
-                <div class="map-control" style="font-size: 0.7rem;">
-                    <span class="text-muted">"ALT:"</span>
-                    {move || drone_position().map(|p| format!("{:.0}m", p.altitude_m)).unwrap_or_else(|| "---".to_string())}
-                    " "
-                    <span class="text-muted">"HDG:"</span>
-                    {move || drone_position().map(|p| format!("{:.0}°", p.heading_deg)).unwrap_or_else(|| "---".to_string())}
+                <div class="map-control readout" style="font-size: 0.7rem;">
+                    <span class="readout-cs">
+                        {move || readout().map(|(cs, _, _)| cs).unwrap_or_else(|| "NO CONTACT".to_string())}
+                    </span>
+                    <span class="text-muted">"ALT"</span>
+                    <span class="readout-val">
+                        {move || readout().map(|(_, alt, _)| format!("{:>5.0} m", alt)).unwrap_or_else(|| "  --- m".to_string())}
+                    </span>
+                    <span class="text-muted">"HDG"</span>
+                    <span class="readout-val">
+                        {move || readout().map(|(_, _, hdg)| format!("{:03.0}°", hdg)).unwrap_or_else(|| "---°".to_string())}
+                    </span>
                 </div>
             </div>
         </div>
