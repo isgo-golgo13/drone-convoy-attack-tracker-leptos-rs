@@ -6,6 +6,8 @@ use chrono::{DateTime, Timelike, Utc};
 use leptos::prelude::*;
 
 use crate::state::use_app_state;
+use crate::components::{regions::TheaterId, tactical_select::{SelectOption, SelectTone, TacticalSelect}};
+
 
 /// Header component with logo and mission clock
 #[component]
@@ -83,6 +85,18 @@ pub fn Header() -> impl IntoView {
             </div>
 
             <div class="flex items-center gap-md">
+                // Mission selector: which tactical theater the map shows.
+                // Sits immediately left of the link status pill. Writes only
+                // the theater signal; the map owns everything that follows.
+                <TacticalSelect
+                    label="THEATER"
+                    options=TheaterId::ALL
+                        .iter()
+                        .map(|t| SelectOption { key: *t, label: t.theater().label })
+                        .collect::<Vec<_>>()
+                    value=state.selected_theater
+                    tone=SelectTone::Danger
+                />
                 <div class="status-badge" class:nominal=move || ws_status().0 == "nominal" class:critical=move || ws_status().0 == "critical">
                     <span class="status-dot" class:nominal=move || ws_status().0 == "nominal" class:critical=move || ws_status().0 == "critical"></span>
                     {move || ws_status().1}

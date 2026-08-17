@@ -19,6 +19,9 @@ pub struct AppState {
     /// Rolling convoy-average telemetry, one point per poll tick. The chart
     /// reads this reactively; `lib.rs` appends and caps it.
     pub telemetry_series: RwSignal<Vec<TelemetryPoint>>,
+    /// Which tactical theater the map shows. Written by the header's mission
+    /// selector, read by `map.rs`. Default Afghanistan (Kandahar).
+    pub selected_theater: RwSignal<crate::components::regions::TheaterId>,
     pub ws_connected: RwSignal<bool>,
     pub mission_start: RwSignal<Option<DateTime<Utc>>>,
     pub alerts: RwSignal<Vec<Alert>>,
@@ -33,6 +36,7 @@ impl AppState {
             drones: RwSignal::new(HashMap::new()),
             engagements: RwSignal::new(Vec::new()),
             telemetry_series: RwSignal::new(Vec::new()),
+            selected_theater: RwSignal::new(crate::components::regions::TheaterId::default()),
             ws_connected: RwSignal::new(false),
             mission_start: RwSignal::new(None),
             alerts: RwSignal::new(Vec::new()),
