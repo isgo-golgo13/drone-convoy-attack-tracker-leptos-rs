@@ -337,10 +337,15 @@ run-api-release: build-api
 	@printf "$(CYAN)▶ Starting GraphQL API (release)...$(NC)\n"
 	@$(TARGET_DIR)/release/drone-api
 
+# Which theater the convoy flies. Must match the dashboard's THEATER selector
+# for airframes to sit on the pins (the map warns if they differ).
+#   make run-simulator THEATER=iraq
+THEATER ?= afghanistan
+
 .PHONY: run-simulator
 run-simulator:
-	@printf "$(CYAN)▶ Starting Drone Simulator...$(NC)\n"
-	@$(CARGO) run --package drone-simulator
+	@printf "$(CYAN)▶ Starting Drone Simulator ($(THEATER))...$(NC)\n"
+	@DRONE_THEATER=$(THEATER) $(CARGO) run --package drone-simulator
 
 .PHONY: run-simulator-release
 run-simulator-release: build-simulator

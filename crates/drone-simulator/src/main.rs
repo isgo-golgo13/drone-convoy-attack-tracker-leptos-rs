@@ -40,6 +40,13 @@ struct Args {
     #[arg(short, long, default_value = "4")]
     drones: usize,
 
+    /// Tactical theater to fly (also DRONE_THEATER): afghanistan | syria |
+    /// libya | pakistan | iran | iraq. The convoy follows that theater's
+    /// published route — the same points the dashboard draws as pins — so
+    /// posted positions land exactly on the track. Default: afghanistan.
+    #[arg(long, env = "DRONE_THEATER", default_value = "afghanistan")]
+    theater: String,
+
     /// API endpoint (also DRONE_API_URL). Point it at the Gateway when the
     /// stack runs in Kubernetes: https://drone.localtest.me/graphql
     #[arg(long, env = "DRONE_API_URL", default_value = "http://localhost:8080/graphql")]
@@ -77,7 +84,13 @@ async fn main() -> Result<()> {
         args.callsign, args.drones, args.mission
     );
 
-    let mut convoy = ConvoySimulator::new(&args.callsign, &args.mission, args.drones);
+    let theater = drone_domain::TheaterId::from_slug(&args.theater).unwrap_or_else(|| {
+        let valid: Vec<&str> = drone_domain::TheaterId::ALL.iter().map(|t| t.slug()).collect();
+        warn!("unknown theater '{}' — valid: {} — flying afghanistan", args.theater, valid.join(", "));
+        drone_domain::TheaterId::Afghanistan
+    });
+    info!("Theater: {} ({} waypoints)", theater.theater().label, theater.theater().route.len());
+    let mut convoy = ConvoySimulator::new(&args.callsign, &args.mission, args.drones, theater);
     let client = Client::builder()
         .danger_accept_invalid_certs(args.insecure_tls)
         .build()

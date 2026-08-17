@@ -50,40 +50,11 @@ fn inline_svg(svg: &str) -> &str {
     svg.find("<svg").map_or(svg, |i| &svg[i..])
 }
 
-/// Spacing between drones, in route legs. Enough to read as line astern
-/// without the airframes overlapping at map zoom 8.
-const CONVOY_SPACING_LEGS: f64 = 0.55;
-
 /// Animation tick. 120ms is smooth without flooding Leaflet with layer updates.
 const FLIGHT_TICK_MS: i32 = 120;
 
-/// Legs advanced per tick. The full route takes roughly three minutes.
-const LEGS_PER_TICK: f64 = 0.006;
-
-/// Position and heading at `progress` legs along `route`, wrapping at the end.
-///
-/// Returns the interpolated point plus a compass heading derived from the leg
-/// direction, so the airframe always points where it is going.
-fn route_point(route: &[(f64, f64)], progress: f64) -> (f64, f64, f64) {
-    let legs = (route.len().max(2) - 1) as f64;
-    let wrapped = progress.rem_euclid(legs);
-    let idx = wrapped.floor() as usize;
-    let frac = wrapped - wrapped.floor();
-
-    let (lat_a, lng_a) = route[idx.min(route.len() - 1)];
-    let (lat_b, lng_b) = route[(idx + 1).min(route.len() - 1)];
-
-    let lat = lat_a + (lat_b - lat_a) * frac;
-    let lng = lng_a + (lng_b - lng_a) * frac;
-
-    // Longitude degrees shrink with latitude; without the cos correction the
-    // heading is visibly wrong at this latitude.
-    let d_lng = (lng_b - lng_a) * lat.to_radians().cos();
-    let d_lat = lat_b - lat_a;
-    let heading = d_lng.atan2(d_lat).to_degrees().rem_euclid(360.0);
-
-    (lat, lng, heading)
-}
+/// Poll cadence the flight loop interpolates across; must match lib.rs.
+const POLL_INTERVAL_MS: i32 = 2_000;
 
 fn lat_lng(lat: f64, lng: f64) -> JsValue {
     let arr = js_sys::Array::new();
@@ -271,6 +242,19 @@ fn fire_burst(map: &Map, lat: f64, lng: f64, hit: bool) {
     cleanup.forget();
 }
 
+/// Which theater the SERVER says the convoy is in: nearest AOR centre to the
+/// drones' mean reported position. Exact for these six theaters (they are
+/// thousands of km apart) and needs no wire change. `None` until fixes exist.
+fn flown_theater(drones: &std::collections::HashMap<uuid::Uuid, crate::state::DroneState>) -> Option<TheaterId> {
+    if drones.is_empty() { return None; }
+    let n = drones.len() as f64;
+    let (mlat, mlng) = drones.values().fold((0.0, 0.0), |(a, b), d| (a + d.position.latitude / n, b + d.position.longitude / n));
+    TheaterId::ALL.iter().copied().min_by(|x, y| {
+        let d = |t: &TheaterId| { let c = t.theater().center; (c.0 - mlat).powi(2) + (c.1 - mlng).powi(2) };
+        d(x).partial_cmp(&d(y)).unwrap_or(std::cmp::Ordering::Equal)
+    })
+}
+
 /// Offset a point by `km` along `heading_deg` -- the shot lands where the
 /// drone was aiming, not on top of it. Flat-earth is fine at these ranges.
 fn project(lat: f64, lng: f64, heading_deg: f64, km: f64) -> (f64, f64) {
@@ -443,33 +427,75 @@ pub fn MapPanel() -> impl IntoView {
             sync_closure.forget();
 
             // ---------------------------------------------------------------
-            // Flight loop. Each drone sits CONVOY_SPACING_LEGS behind the one
-            // ahead, so the formation reads as line astern along the track.
+            // Flight loop -- SERVER-ANCHORED.
+            //
+            // The airframes fly the positions the API reports, not a client
+            // route. Each poll (2 s) delivers a fresh fix per drone; the loop
+            // interpolates from the previous fix to the latest over one poll
+            // interval, so a marker sits EXACTLY on the server fix at every
+            // poll boundary and glides between them at animation rate. That
+            // is what makes the map, the GPS readout on the cards, and the
+            // database agree: one truth (the simulator flying the theater
+            // route), displayed smoothly.
+            //
+            // `positions` (last drawn lat/lng/heading per callsign) still feeds
+            // the impact bursts. `live_positions` in AppState feeds the cards.
             // ---------------------------------------------------------------
-            let progress = Rc::new(Cell::new(0.0_f64));
-            // Last known (lat, lng, heading) per callsign -- where a burst
-            // originates when that drone reports an engagement.
+            /// Per-drone interpolation state: (prev fix, latest fix, when the
+            /// latest arrived in ms, drone_id).
+            type Fix = (f64, f64, f64, f32); // lat, lng, alt, hdg
+            let anchors: Rc<RefCell<std::collections::HashMap<String, (Fix, Fix, f64, uuid::Uuid)>>> =
+                Rc::new(RefCell::new(std::collections::HashMap::new()));
             let positions: Rc<RefCell<Vec<(String, f64, f64, f64)>>> = Rc::new(RefCell::new(Vec::new()));
+
+            // Anchor updater: on every state.drones change (each poll), shift
+            // latest -> prev and store the new server fix with its arrival time.
+            {
+                let anchors = Rc::clone(&anchors);
+                Effect::new(move |_| {
+                    let drones = state.drones.get();
+                    let now = js_sys::Date::now();
+                    let mut a = anchors.borrow_mut();
+                    for d in drones.values() {
+                        let fix: Fix = (d.position.latitude, d.position.longitude, d.position.altitude_m, d.position.heading_deg);
+                        match a.get_mut(&d.callsign) {
+                            Some((prev, latest, at, _)) => {
+                                if *latest != fix { *prev = *latest; *latest = fix; *at = now; }
+                            }
+                            None => { a.insert(d.callsign.clone(), (fix, fix, now, d.drone_id)); }
+                        }
+                    }
+                });
+            }
+
             let tick = {
-                let progress = progress.clone();
                 let markers = Rc::clone(&markers);
-                let route = Rc::clone(&route);
+                let anchors = Rc::clone(&anchors);
                 let positions = Rc::clone(&positions);
                 move || {
-                    let t = progress.get() + LEGS_PER_TICK;
-                    progress.set(t);
-                    let r = route.get();
+                    let now = js_sys::Date::now();
+                    let a = anchors.borrow();
                     let mut pos = positions.borrow_mut();
                     pos.clear();
+                    let mut live: std::collections::HashMap<uuid::Uuid, crate::state::LivePosition> =
+                        std::collections::HashMap::new();
 
-                    for (i, (callsign, marker)) in markers.borrow().iter().enumerate() {
-                        let offset = t - (i as f64) * CONVOY_SPACING_LEGS;
-                        if offset < 0.0 {
-                            continue; // still holding at the IP
-                        }
-                        let (lat, lng, heading) = route_point(r, offset);
+                    for (callsign, marker) in markers.borrow().iter() {
+                        let Some(((plat, plng, palt, phdg), (lat1, lng1, alt1, hdg1), at, id)) = a.get(callsign) else { continue };
+                        // Fraction of the way from prev to latest, by wall clock
+                        // over one poll interval; clamps at the latest fix if a
+                        // poll is late (never extrapolates past ground truth).
+                        let f = ((now - at) / f64::from(POLL_INTERVAL_MS)).clamp(0.0, 1.0);
+                        let lat = plat + (lat1 - plat) * f;
+                        let lng = plng + (lng1 - plng) * f;
+                        let alt = palt + (alt1 - palt) * f;
+                        // Heading: shortest-arc blend, then snap to the latest.
+                        let dh = ((hdg1 - phdg + 540.0) % 360.0) - 180.0;
+                        let heading = ((phdg + dh * f as f32) + 360.0) % 360.0;
+
                         marker.set_lat_lng(&lat_lng(lat, lng));
-                        pos.push((callsign.clone(), lat, lng, heading));
+                        pos.push((callsign.clone(), lat, lng, f64::from(heading)));
+                        live.insert(*id, crate::state::LivePosition { latitude: lat, longitude: lng, altitude_m: alt, heading_deg: heading });
 
                         // Leaflet owns the transform on the icon container, so
                         // rotate the inner element instead of fighting it.
@@ -484,6 +510,10 @@ pub fn MapPanel() -> impl IntoView {
                             }
                         }
                     }
+                    drop(pos);
+                    drop(a);
+                    // Publish the smoothed fixes for the GPS readout.
+                    state.live_positions.set(live);
                 }
             };
 
@@ -506,7 +536,6 @@ pub fn MapPanel() -> impl IntoView {
                 let map = Rc::clone(&map);
                 let layers = Rc::clone(&layers);
                 let route = Rc::clone(&route);
-                let progress = progress.clone();
                 let markers = Rc::clone(&markers);
                 let last: Rc<Cell<TheaterId>> = Rc::new(Cell::new(state.selected_theater.get_untracked()));
                 Effect::new(move |_| {
@@ -518,9 +547,11 @@ pub fn MapPanel() -> impl IntoView {
                     if let Some(old) = layers.borrow_mut().take() { old.clear(); }
                     *layers.borrow_mut() = Some(draw_theater(&map, t));
                     route.set(t.route);
-                    progress.set(0.0);
-                    let ip = t.route[0];
-                    for (_, m) in markers.borrow().iter() { m.set_lat_lng(&lat_lng(ip.0, ip.1)); }
+                    // Airframes fly SERVER positions. Selecting a theater here
+                    // changes what the map shows; the convoy's real track comes
+                    // from the simulator's --theater. If they differ, the map
+                    // overlay says so (see the SIM banner) rather than faking
+                    // airframes onto pins the simulator is not flying.
                     log::info!("map: theater -> {} ({} waypoints)", t.label, t.route.len());
                 });
             }
@@ -596,6 +627,21 @@ pub fn MapPanel() -> impl IntoView {
                     <span class="status-dot nominal"></span>
                     {move || state.selected_theater.get().theater().aor}
                 </div>
+                // Truth guard: the airframes fly SERVER positions. If the
+                // simulator is flying a different theater than the one being
+                // viewed, say so instead of drawing drones onto pins they are
+                // not on. Restart the sim with --theater <slug> to match.
+                {move || {
+                    let viewed = state.selected_theater.get();
+                    flown_theater(&state.drones.get())
+                        .filter(|f| *f != viewed)
+                        .map(|f| view! {
+                            <div class="map-control map-control-warn">
+                                <span class="status-dot warning"></span>
+                                {format!("SIM FLYING {} — restart with --theater {}", f.theater().label, viewed.slug())}
+                            </div>
+                        })
+                }}
 
                 {move || drone_position().map(|pos| view! {
                     <div class="map-control">

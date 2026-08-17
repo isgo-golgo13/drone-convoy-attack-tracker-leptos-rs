@@ -21,16 +21,22 @@ pub struct SimulatedDrone {
 }
 
 impl SimulatedDrone {
-    /// Create a new simulated drone.
-    pub fn new(callsign: &str, platform_type: &str) -> Self {
+    /// Create a new simulated drone flying `theater`'s published route.
+    ///
+    /// `slot` is the drone's index in the formation; it sets a small lateral
+    /// offset (metres, perpendicular to the leg) so four drones on one route
+    /// read as a formation instead of a single stacked pixel.
+    pub fn new(callsign: &str, platform_type: &str, theater: &drone_domain::Theater, slot: usize) -> Self {
         // Deterministic id: UUIDv5 of the callsign. A simulator restart
         // re-derives the SAME id per callsign, so its upserts OVERWRITE the
         // previous run's rows (drones, waypoints, telemetry buckets) instead
         // of accumulating ghost drones with fresh random ids — which is
         // exactly what a random v4 here did across restarts.
         let drone_id = Uuid::new_v5(&Uuid::NAMESPACE_OID, callsign.as_bytes());
-        let mut flight_gen = FlightPathGenerator::kandahar();
-        let waypoints = flight_gen.generate_mission_path(callsign);
+        let mut flight_gen = FlightPathGenerator::for_theater(theater);
+        // Alternate sides of the track: 0, +250 m, -250 m, +500 m, ...
+        let spread_m = ((slot as f64 + 1.0) / 2.0).floor() * 250.0 * if slot % 2 == 1 { 1.0 } else { -1.0 };
+        let waypoints = flight_gen.generate_route_path(theater.route, spread_m);
         let telemetry_gen = TelemetryGenerator::new(drone_id, callsign, waypoints.clone());
 
         Self {
@@ -80,6 +86,8 @@ pub enum ConvoyStatus {
 /// Convoy simulator managing multiple drones.
 pub struct ConvoySimulator {
     pub convoy_id: Uuid,
+    /// The theater whose route this convoy flies.
+    pub theater: drone_domain::TheaterId,
     pub callsign: String,
     pub mission_type: String,
     pub drones: HashMap<Uuid, SimulatedDrone>,
@@ -99,7 +107,7 @@ impl ConvoySimulator {
     /// Override with DRONE_CONVOY_ID once the convoy repository is wired up.
     pub const DEMO_CONVOY_ID: &'static str = "550e8400-e29b-41d4-a716-446655440000";
 
-    pub fn new(callsign: &str, mission_type: &str, drone_count: usize) -> Self {
+    pub fn new(callsign: &str, mission_type: &str, drone_count: usize, theater: drone_domain::TheaterId) -> Self {
         let convoy_id = std::env::var("DRONE_CONVOY_ID")
             .ok()
             .and_then(|raw| Uuid::parse_str(&raw).ok())
@@ -112,7 +120,7 @@ impl ConvoySimulator {
         for i in 0..drone_count {
             let drone_callsign = format!("{}-{:02}", callsign, i + 1);
             let platform = platforms[i % platforms.len()];
-            let drone = SimulatedDrone::new(&drone_callsign, platform);
+            let drone = SimulatedDrone::new(&drone_callsign, platform, theater.theater(), i);
             drones.insert(drone.drone_id, drone);
         }
 
@@ -120,6 +128,7 @@ impl ConvoySimulator {
             convoy_id,
             callsign: callsign.to_string(),
             mission_type: mission_type.to_string(),
+            theater,
             drones,
             status: ConvoyStatus::Active,
             start_time: Utc::now(),

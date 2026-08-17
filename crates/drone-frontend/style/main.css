@@ -501,3 +501,14 @@ body {
     35%  { transform: scale(1.0);  opacity: 0.95; }
     100% { transform: scale(1.35); opacity: 0.0; }
 }
+
+/* Map overlay warning variant (theater mismatch) */
+.map-control-warn { border-color: var(--status-warning); color: var(--status-warning); }
+
+/* GPS readout on drone cards: server-anchored, smoothed between polls */
+.drone-gps {
+    margin-top: 3px; display: flex; align-items: baseline; gap: 6px;
+    font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; letter-spacing: 0.02em;
+    color: var(--text-primary); font-variant-numeric: tabular-nums;
+}
+.drone-gps .gps-tag { font-size: 0.6rem; letter-spacing: 0.12em; color: var(--text-muted); }
