@@ -121,27 +121,43 @@ async fn main() -> Result<()> {
         wait_for_api(&client, &args.api_url).await;
     }
 
-    // Initial theater: the CONVOY RECORD is authoritative if it exists and
-    // carries a known slug (the dashboard may have retasked it while no sim
-    // was running); otherwise the --theater/DRONE_THEATER value seeds it.
+    // Initial theater: SEED from --theater/DRONE_THEATER, deliberately NOT
+    // from a stale record. A record left over from a previous run is not a
+    // live order -- the operator's opening dashboard view is, and it issues
+    // that order (retaskConvoy) as soon as it loads. Starting where the
+    // dashboard defaults means the two agree on boot; any disagreement is
+    // reconciled by that first order within a few ticks. Live tasking is
+    // still read from the record from the first sortie onward.
     let mut theater = requested;
-    if args.service && !args.dry_run {
-        let convoy_id = ConvoySimulator::resolve_convoy_id();
-        if let Some(t) = read_tasking(&client, &args.api_url, convoy_id).await {
-            if t != requested {
-                info!("Tasking order on record: {} (overrides --theater {})", t.theater().label, requested.slug());
-            }
-            theater = t;
-        }
-    }
 
     loop {
+        // Boot rule: the FIRST sortie seeds from --theater and ignores whatever
+        // the record says -- a record left by yesterday's run is not a live
+        // order. The dashboard's opening view IS a live order: it is issued on
+        // page load and re-issued the moment drones appear, and the mid-sortie
+        // tasking poll picks it up within a few ticks. So on boot the two
+        // agree by default (both Afghanistan) and any disagreement heals in
+        // seconds -- without a stale record ever winning. From the second
+        // sortie on, the record is authoritative between sorties as before.
         info!("Theater: {} ({} waypoints)", theater.theater().label, theater.theater().route.len());
         let mut convoy = ConvoySimulator::new(&args.callsign, &args.mission, args.drones, theater);
         info!("Convoy ID: {}", convoy.convoy_id);
 
         if !args.dry_run {
             bootstrap(&client, &args, &convoy).await;
+        }
+
+        // Immediately after bootstrap, catch an order the dashboard issued
+        // while we were starting up (its opening view). Zero-tick latency for
+        // the common "make serve, open dashboard" flow.
+        if args.service && !args.dry_run {
+            if let Some(t) = read_tasking(&client, &args.api_url, convoy.convoy_id).await {
+                if t != theater {
+                    info!("Order on record at bootstrap: {} -> {} — re-flying", theater.theater().label, t.theater().label);
+                    theater = t;
+                    continue;
+                }
+            }
         }
 
         let outcome = fly_sortie(&client, &args, &mut convoy).await;
