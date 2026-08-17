@@ -1,9 +1,11 @@
 # context-handoff.md — argocd-applicationsets-gitops
 
-**Updated 2026-08-17.** Read PART 0 first: it is the current state and
-supersedes the "how to fix" prose in Parts 1–2, which are RESOLVED and kept
-only as institutional knowledge. PART 4 is the open work, headed by the
-tactical map region selector.
+**Updated 2026-08-17 (late).** Read PART 0 first: it is the current state
+and supersedes the "how to fix" prose in Parts 1–2, which are RESOLVED and
+kept only as institutional knowledge. PART 4 is the open work. **PART 5 is
+the systematic roadmap for the Dioxus companion product** — read it before
+starting that repo. This file now lives in BOTH repositories (the ArgoCD
+reference and the standalone app); keep them in sync by copying whole.
 
 ## What this repository is
 
@@ -233,75 +235,262 @@ this Application). Delivery zip hygiene: build with `git archive` or from a
 COPY with `.git` removed — never `rm -rf .git` on the working repo; slim
 screenshots with `sips -Z 1800`.
 
+
+## 0.7 The UI is the commander (Tier 2) — shipped and confirmed 2026-08-17
+
+The single largest change since the persistence rewrite, and the one that
+makes the app demo-grade: **`make serve` is the only command.** It brings up
+the DBs, API, frontend, AND the simulator as a long-lived **convoy service**.
+The header's THEATER selector is the tasking control — pick a theater and the
+convoy is retasked to it, no second make, no flag, nothing on screen ever
+names a shell command.
+
+Design (zero schema change): the theater is a **tasking order on the convoy
+record** — `aor_name` = theater slug, `aor_center` = centre; both columns
+pre-existed. `retaskConvoy(convoyId, theater)` mutation (validated against
+`drone_domain::TheaterId::from_slug`) writes it; the service reads it after
+bootstrap and every `--tasking-poll-ticks` (3) mid-sortie, re-flying from the
+new IP on change. This is precisely the seam a live ground station plugs into
+later: the UI writes to the system of record; whatever flies reads it.
+
+Boot rule (learned the hard way — see root causes below): the service seeds
+its FIRST sortie from `THEATER` (default afghanistan), never from a leftover
+record; the dashboard issues its OPENING selection as an order on load and
+re-issues it the moment drones first appear (0→1 edge). All three boot
+orderings (dashboard-first, service-first, user-picks-during-boot) converge
+within ~3 s; a stale record can never win. **The operator's live view is the
+standing order; a record between runs is not.**
+
+Also shipped this session, all confirmed by screenshot:
+- **One truth, end to end.** `drone-domain/src/theaters.rs` is the shared
+  route table (6 theaters, pure data). The simulator flies those exact
+  waypoints (`generate_route_path`, true leg bearings, formation stagger 2%
+  of mission + theater-scaled lateral spread); the frontend draws those exact
+  pins. The map's flight loop is SERVER-ANCHORED (interpolates between the
+  last two server fixes, never extrapolates). GPS row on every card, live.
+- **Tactical theater selector** (`TacticalSelect<K>` — web-native, keyboard,
+  ARIA, `tone=Danger`), left of ONLINE. **Impact bursts** in a Leaflet pane
+  at z 550 (below airframes), fired from the shooter's live position.
+- **Map HUD card** top-right (300 px, AOR row + RETASKING / TASKING REJECTED
+  rows). **ALT/HDG readout** bottom-right follows the selected drone or the
+  lead. **Map click = app-wide selection** (readout, card highlight, popup
+  with the same live ALT/HDG). Footer marking is a constant, `UNCLASSIFIED //
+  CUI` (FOUO was retired ~2020). Panel header `FLIGHT TELEMETRY`, in-chart
+  title removed. Favicon = `drone-favicon.svg` (green fallbacks; `drone.svg`
+  untouched).
+- **deploy/** tree: KinD 3+3 (`kind-config.yaml`, `kind-bootstrap.sh`,
+  `kind-expose.sh`, `README-setup.md`), Helm chart in screaming architecture
+  with `dependencies: []` BY DESIGN, Fly/Railway/Cloudflare configs. Sim:
+  `DRONE_API_URL`, `--insecure-tls`, lenient bool env parser.
+
+Root causes found this session (add to the never-again list):
+9.  **`convoys` has no `updated_at`.** My retask UPDATE named it → Scylla
+    "Unknown identifier" → mutation errored → order silently never landed.
+    RULE: any new CQL gets grepped against `001_core_schema.cql` first. My
+    audits verified code-vs-code, not code-vs-schema.
+10. **clap `bool` + `env` accepts only true/false.** `DRONE_SERVICE=1`
+    crashed at argv parse. Fixed with a lenient parser on both env flags.
+11. **Stale record wins on boot** (the "Afghanistan never shows drones until
+    I switch theaters" report). Fixed by the boot rule above.
+12. **`.map-overlay` at z-index 100 sat UNDER Leaflet's tiles** — the AOR
+    label and truth-guard banner had been invisible since day one.
+13. **Formation collapsed to a point** the moment positions became real (all
+    four at the same server progress). Doctrine had to be modelled: line
+    astern stagger + theater-scaled spread.
+14. **`view!` attribute values must be single expressions** — a multi-line
+    method chain produced a 10-error cascade. Hoist closures/vecs above.
+15. **Map click never set `selected_drone`** — Leaflet popup and the readout
+    disagreed. One selection, three views.
+
 ---
 
-# PART 4 — WHAT IS NEXT
+# PART 4 — WHAT IS NEXT (app)
 
-## 4.1 NEXT FEATURE: tactical map region selector (spec'd, not started)
+The Leptos product is **feature-complete for v1.0**. Remaining items are
+polish and the sale itself; none block a demo.
 
-A **red dropdown selector on the top-right of the header navbar** that loads
-a different tactical theater on the map. Requirements as stated:
+## 4.1 Sale (Gumroad) — see sell-packaging-gumroad.md
+Runbook exists (Phases 0–6): private repo, custom commercial LICENSE
+(`license-file` in Cargo.toml), `git archive` from a tag, $150 single /
+$375 team, PDF stamping + license keys, reveal-first ~85-page chapter plan.
+Target: live by end of week of 2026-08-17.
 
-- **Web-native styling** via the tactical select trait — it must NOT look like
-  a macOS-native `<select>`. Same HUD language as the rest of the header
-  (JetBrains Mono, accent red for this control since it's a mode switch, dark
-  panel dropdown, keyboard-navigable).
-- **Six theaters**, first is the default: **Afghanistan (Kandahar — current
-  view)**, Syria, Libya, Pakistan, Iran (Tehran), Iraq (Baghdad).
-- Choosing a region **dynamically re-centers the Leaflet map on that theater
-  and drops that region's red waypoint pins** — the same visual grammar as
-  today's Kandahar route, one route set per region.
+## 4.2 App wishlist (priority order)
+1. **Tier 3: tasking over subscriptions** — the service polls the record
+   every 3 ticks; swap for a `/graphql/ws` subscription on the convoy record.
+   Same model, ~ms latency. Additive; polling stays as fallback.
+2. **ENGAGE button + explosion** — `record_engagement` in `api.rs` still has
+   zero callers; bursts and positions already exist. A button that fires a
+   real mutation and the map answers.
+3. **Same-origin API_URL** — `const API_URL = "http://localhost:8080/graphql"`
+   is wrong in-cluster; the Helm chart routes `/graphql` same-origin. One
+   relative path + a `Trunk.toml` proxy for local dev.
+4. **Native-DB run path** — Scylla + Redis are brew-installed on the M2;
+   `deps-up` assumes it owns the containers. `NATIVE_DBS=1` bypass.
+5. Cosmetic: burst size per theater zoom; HUD card shrink-to-fit when only the
+   AOR row shows; Leaflet zoom control restyled to the HUD.
 
-Design guidance for whoever cuts it (this is where the pieces already are):
+## 4.3 First-run verifications still owed
+`make chart-lint && make chart-template`; `make kind-up` (first real run of
+the bootstrap); `helm dependency build` on the ArgoCD wrappers; `helm
+template argocd-apps/app-sets/` (three objects).
 
-- `map.rs` today flies a hardcoded `ROUTE` const (Kandahar). The clean cut is
-  a `regions` module: `struct Theater { id, label, center: (lat, lon), zoom,
-  route: &'static [(f64, f64)] }` and a `THEATERS: [Theater; 6]` table; the
-  selected theater is an `RwSignal<TheaterId>` in `AppState`
-  (`selected_theater`, default Afghanistan). `map.rs` reads it in an Effect:
-  on change, `map.setView(center, zoom)`, clear and re-add the waypoint
-  markers + polyline for that route, and reset the flight loop's progress so
-  the airframes restart at that route's IP.
-- The **selector component** lives in `header.rs` (right side, beside ONLINE)
-  and only writes the signal — it knows nothing about Leaflet. That keeps the
-  "tactical select trait" reusable for the next dropdown.
-- **Backend is unaffected**: theaters are a client-side view concern for now.
-  The `waypoints` query is real server-side and this feature is the natural
-  home for the deferred "waypoints → map ROUTE swap" — but do it as a second
-  step, after the selector works against the six static route tables.
-  Persisting the selection (query param or `window.storage`) is a polish item.
-- Route data: six short waypoint arrays (10–26 points each, like Kandahar's
-  26). Sensible centers/zooms: Kandahar 31.6/65.7 z8, Syria (Aleppo–Raqqa
-  corridor) 36.0/38.0 z7, Libya (Sirte–Benghazi) 31.5/18.5 z7, Pakistan
-  (Quetta–Peshawar) 31.5/69.5 z7, Iran (Tehran) 35.7/51.4 z8, Iraq (Baghdad)
-  33.3/44.4 z8. Keep the map tiles as they are (CartoDB); no new tile
-  provider.
+---
 
-## 4.2 App wishlist (unchanged, in priority order)
+# PART 5 — ROADMAP: THE DIOXUS COMPANION PRODUCT
 
-1. **ENGAGE button + explosion.svg impact animation** — `record_engagement`
-   in `api.rs` still has zero callers; the asset is already shipped.
-2. **Real waypoints → map** (pairs with 4.1 as its second step).
-3. **Poll → subscription** over the live `/graphql/ws` — additive; polling
-   stays as the fallback either way.
-4. **Same-origin API_URL** — `api.rs` has `const API_URL =
-   "http://localhost:8080/graphql"`, correct for `make serve`, wrong
-   in-cluster; the Helm chart already routes `/graphql` same-origin through
-   the Gateway, so this is a one-line change to a relative path plus a
-   `Trunk.toml` proxy for local dev.
-5. **Native-DB run path** — ScyllaDB + Redis are brew-installed on the M2
-   (Redis running as a brew service); the Makefile's `deps-up` assumes it owns
-   the containers. A `NATIVE_DBS=1` bypass is a small change; the config
-   already reads `SCYLLA_HOSTS`/`REDIS_URL` from env.
+**Goal.** A second Gumroad product: the SAME system with the Leptos frontend
+replaced by **Dioxus 0.7** (0.7.10 is current stable as of 2026-08-17; 0.8
+is alpha — do not build the product on alpha). Constraints, in the words that
+matter: **backend 100% intact** (not one line in drone-domain,
+drone-persistence, drone-graphql-api, drone-simulator, schema, deploy, or
+Makefile semantics beyond swapping the frontend build tool) and **the front
+end bit-for-bit identical in look and behaviour** — same CSS, same assets,
+same DOM structure, same panels, same HUD, same tasking flow. The Leptos zip
++ these screenshots are the source of truth. If a pixel differs, it is a bug.
 
-## 4.3 First-run verifications still owed (nothing is broken; nothing is proven)
+Repo: `github.com/isgo-golgo13/drone-convoy-attack-tracker-dioxus-rs`.
 
-- `make chart-lint && make chart-template` — first real Helm render.
-- `make kind-up` — first real run of the bootstrap; then `kind-load`,
-  `kind-deploy`, browser, simulator.
-- `helm dependency build` on the addon wrappers in THIS repo (validates the
-  ten refreshed pins); `helm template argocd-apps/app-sets/` (three objects,
-  literal `{{.path.basename}}`-style strings must survive the escaping).
+## 5.0 Why this is a bounded, low-risk port
+The frontend is a thin consumer: 8 components, one `api.rs`, one `state/mod.rs`,
+one `main.css`, three SVG assets, and a `TacticalSelect`. Everything hard —
+schema, resolvers, tasking, simulator, deploy — is behind GraphQL and does
+not know or care what renders the HTML. The frontend's *contract* with the
+rest of the system is exactly: the GraphQL queries/mutations in `api.rs`,
+`drone_domain::theaters`, and `main.css` class names. Keep those three
+identical and the port cannot drift.
+
+## 5.1 Ground rules (write these at the top of the new repo's README)
+1. **Copy, don't fork the backend.** Workspace = the Leptos repo's crates
+   with `drone-frontend` (Leptos) removed and `drone-frontend` (Dioxus) added
+   at the same path and package name, so `Makefile`, Containerfile.frontend,
+   deploy configs and `--package drone-frontend` all keep working unchanged.
+2. **`main.css` is copied byte-for-byte and never edited.** Dioxus renders
+   real DOM; every `class="..."` from the Leptos `view!` becomes `class:
+   "..."` in `rsx!`. If a style needs to change to make Dioxus look right,
+   the DOM structure is wrong, not the CSS.
+3. **`assets/images/*` copied byte-for-byte**, `include_str!` at the same
+   relative paths (`../../../../assets/images/...` — the crate sits at the
+   same depth).
+4. **`api.rs` copied nearly verbatim.** It is plain `gloo-net` + serde with
+   no Leptos dependency; only `log`/`spawn_local` call sites change.
+   `drone-domain` stays the type source (`regions.rs` re-export unchanged).
+5. **Parity checklist per component** (5.4) is the definition of done, not
+   "it works".
+6. **Toolchain:** `dx` (dioxus-cli 0.7.x) replaces `trunk`. `dx serve
+   --platform web` in `serve-frontend`; `dx build --release --platform web`
+   in the Containerfile. `Dioxus.toml` replaces `Trunk.toml`; asset copy
+   (favicon) via `asset!()` macro or `Dioxus.toml` `[web.resource]`.
+
+## 5.2 The translation table (Leptos 0.7 → Dioxus 0.7) — memorise before typing
+| Leptos                                   | Dioxus 0.7                                                    |
+|---                                       |---                                                            |
+| `#[component] fn X() -> impl IntoView`   | `#[component] fn X() -> Element`                              |
+| `view! { <div class="a">..</div> }`      | `rsx! { div { class: "a", .. } }`                             |
+| `RwSignal<T>` in an `AppState` struct    | `Signal<T>` fields; provide via `use_context_provider`        |
+| `use_app_state()` (context read)         | `use_context::<AppState>()`                                   |
+| `sig.get()` / `sig.set()` / `.update()`  | `sig()` (read) / `sig.set()` / `sig.write()`                  |
+| `Effect::new(move \|_\| ..)`            | `use_effect(move \|\| ..)` (auto-tracks reads inside)         |
+| `move \|\| expr` reactive child          | `{expr}` inline in `rsx!` (re-renders on read)                |
+| `<For each=.. key=.. children=..>`       | `for item in items() { Row { key: "{k}", .. } }`              |
+| `class:selected=is_selected`             | `class: if is_selected() { "drone-card selected" } else {..}` |
+| `on:click=handler`                       | `onclick: move \|_\| ..`                                     |
+| `inner_html=svg`                         | `dangerous_inner_html: "{svg}"`                               |
+| `NodeRef` + `node_ref=`                  | `use_signal(\|\| None::<MountedEvent>)` + `onmounted`         |
+| `spawn_local(async ..)`                  | `spawn(async ..)` (Dioxus runtime)                             |
+| `set_interval` via web-sys `Closure`     | `use_future`/`spawn` + `gloo_timers::future::sleep` loop      |
+| `Closure::wrap(...).forget()` for Leaflet| unchanged: keep web-sys/wasm-bindgen exactly as is            |
+| `StoredValue<T>`                         | `use_hook(\|\| Rc::new(RefCell::new(..)))` or `Signal`        |
+| Trunk `data-trunk` copy-file             | `asset!("/assets/images/drone-favicon.svg")`                  |
+Notes: Dioxus `Signal` is `Copy` and readable via call syntax; `use_effect`
+tracks dependencies automatically like Leptos `Effect`. `<For>`'s composite-
+key lesson (root cause #2) applies identically: keys must carry changing
+content or rows freeze — Dioxus's keyed diff behaves the same way.
+
+## 5.3 Systematic execution — phase order, each with an exit test
+**Phase A — Skeleton (½ day).** New repo from the Leptos one; delete
+`crates/drone-frontend`; `dx new` a `web` project into that path with the
+same package name; `main.css` + `assets/` + `index.html` (`<head>` links,
+Leaflet + ECharts script tags, `main.css` link) copied; `Dioxus.toml` written.
+Exit: `make serve` builds and serves a blank page with the HUD background,
+fonts and favicon; API + service unchanged and green.
+
+**Phase B — State + services (½ day).** Port `state/mod.rs` (`AppState` as
+context of `Signal`s, `DroneState`/`EngagementEvent`/`LeaderboardEntry`/
+`LivePosition`/`TelemetryPoint` unchanged), `services/api.rs` (verbatim minus
+call sites), the 2 s poll loop from `lib.rs` (`spawn` + sleep). Exit: browser
+console shows the same log lines the Leptos build prints (`tracking convoy…`,
+polls succeeding); no UI yet.
+
+**Phase C — Static panels (1 day).** Header (clocks, mission timer),
+Footer, ConvoyStatsPanel, EngagementFeedPanel, LeaderboardPanel (with
+`target-streak.svg`), DroneListPanel + DroneCard (SVG icon, GPS row, composite
+keys). Exit: parity checklist (5.4) green for each; side-by-side screenshot
+diff against the Leptos build at the same viewport.
+
+**Phase D — TacticalSelect + tasking (½ day).** Port the component (button +
+listbox, keyboard, outside-click via document listener — web-sys unchanged);
+wire the theater `use_effect` that issues `retaskConvoy` on opening value,
+change, and drones 0→1. Exit: pick SYRIA → convoy retasks; console shows the
+same `tasking order` lines; RETASKING row appears/clears.
+
+**Phase E — Map (1–1.5 days; the only real work).** `map.rs`: keep every
+`#[wasm_bindgen] extern` binding and every Leaflet call exactly as is —
+Dioxus does not change wasm-bindgen. Mount via `onmounted` on the map div
+(replaces the mount Effect). Server-anchored flight loop, theater switch,
+impact pane + bursts, HUD card, ALT/HDG readout, marker-click selection.
+Exit: full parity — airframes, formation, bursts under airframes, card
+top-right, readout follows selection, popup ALT/HDG matches readout.
+
+**Phase F — Chart (½ day).** charming's `WasmRenderer` is framework-
+agnostic: render-once-then-`update` on the kept `Echarts` handle inside a
+`use_effect` on `telemetry_series`. Exit: LIVE badge, rolling window,
+tooltip values rounded (already rounded at source).
+
+**Phase G — Build/deploy parity (½ day).** `Containerfile.frontend` → `dx
+build`; nginx.conf unchanged; `wrangler.jsonc` asset dir → `target/dx/…/public`
+(check the 0.7 output path); Helm chart untouched (image tag only). Exit:
+`make kind-deploy` serves the Dioxus build at `https://drone.localtest.me`.
+
+**Phase H — Parity gate + docs (½ day).** Run the 5.4 checklist end to end
+in both builds; README swap (Leptos → Dioxus in the toolchain table and
+architecture text only); CHANGELOG v1.0.0-dioxus. Exit: sign-off.
+
+Total: ~5 working days for one person who has the Leptos build open in the
+next window the whole time.
+
+## 5.4 Parity checklist (definition of done — every line must be true)
+- Same viewport, same theater, same sortie phase: screenshots diff to zero
+  outside the map tiles and live numbers.
+- Header: ZULU/DATE/MISSION tick; THEATER selector left of ONLINE, red tone,
+  keyboard-navigable, closes on outside click.
+- Leaderboard: rank colours, target roundel streak, empty state text.
+- Convoy assets: SVG icon 30 px green, FUEL/ACC/WP live, GPS row glides,
+  card highlights on selection (from card OR map click).
+- Convoy status: airborne count includes RTB; avg fuel; hits/total.
+- Flight telemetry: `FLIGHT TELEMETRY` header only, LIVE badge after 2 pts.
+- Engagement feed: single scrollbar, HIT/MISS colours, Zulu timestamps.
+- Map: tiles + labels layers; AOR ring; red pins + track per theater; four
+  airframes line-astern, heading-rotated; bursts under airframes, hit vs miss
+  colours; HUD card top-right (AOR / RETASKING / TASKING REJECTED);
+  bottom-right readout (selected or lead); popup with FUEL/ACC/ALT/HDG.
+- Tasking: opening view issues order; change issues order; 0→1 re-issue;
+  "not found" quiet; rejection red row; service retasks within ~3 s.
+- Footer: `CLASSIFICATION: UNCLASSIFIED // CUI`, CONNECTED dot.
+- Favicon: green airframe. Tab title identical.
+- Console: same INFO lines in the same order on a cold boot.
+
+## 5.5 Product framing (so the second sale is not "the same thing again")
+Sell it as **the same system, second UI framework** for buyers deciding
+between the two Rust web stacks — the tutorial's new chapters are the
+translation table (5.2), the "what changed / what didn't" diff (nothing below
+the frontend), and an honest Leptos-vs-Dioxus comparison from having built
+both: signals model, `rsx!` vs `view!`, tooling (`dx` vs `trunk`), hot-reload,
+bundle size, ecosystem. Bundle discount for owners of the Leptos edition.
+Dioxus's genuine differentiator — desktop/mobile from one codebase — is a
+**v2 of this product** (the HUD as a native desktop app), not part of v1;
+note it in the README as the road ahead, do not build it into the parity
+release.
 
 ---
 
