@@ -231,12 +231,16 @@ body {
 }
 
 .map-overlay {
-    position: absolute; top: var(--space-md); left: var(--space-md);
+    /* Top-RIGHT: Leaflet's zoom control owns top-left, and the strip was
+       covering it. Right-anchored and width-capped to the map so the warning
+       segment can never run off the edge (it wraps instead). */
+    position: absolute; top: var(--space-md); right: var(--space-md);
+    max-width: calc(100% - 2 * var(--space-md));
     /* Above Leaflet's panes (<=700) and controls (1000): the overlay was at
        100 and rendered UNDER the tiles -- the AOR label and the truth-guard
        banner were invisible. Below the TacticalSelect panel (2000). */
-    z-index: 1100; display: flex; flex-direction: column; gap: var(--space-sm);
-    pointer-events: none;
+    z-index: 1100; display: flex; flex-direction: column; align-items: flex-end;
+    gap: var(--space-sm); pointer-events: none;
 }
 .map-overlay .map-control { pointer-events: auto; }
 
@@ -518,12 +522,17 @@ body {
     backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
     box-shadow: 0 2px 10px rgba(0,0,0,0.55);
     font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; letter-spacing: 0.06em;
-    text-transform: uppercase; white-space: nowrap;
+    text-transform: uppercase; max-width: 100%;
 }
 .map-strip-seg {
     display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px;
-    color: var(--text-primary);
+    color: var(--text-primary); white-space: nowrap;
 }
+/* The warning segment is the long one: let it wrap onto a second line inside
+   its own cell rather than pushing the strip past the map edge. */
+.map-strip-seg.warn { flex-wrap: wrap; white-space: normal; row-gap: 4px; min-width: 0; }
+.map-strip-seg.warn .warn-text { white-space: normal; }
+.map-strip-seg.warn code { white-space: nowrap; }
 .map-strip-seg + .map-strip-seg { border-left: 1px solid var(--border-primary); }
 .map-strip-seg.warn {
     color: #ffb437;                                   /* solid amber, no wash */
