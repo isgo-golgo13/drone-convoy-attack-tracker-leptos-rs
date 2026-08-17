@@ -1,0 +1,59 @@
+# ==============================================================================
+# Containerfile - Leptos Frontend (WASM), served by nginx
+# Built with Podman:
+#   podman build -f containers/Containerfile.frontend -t drone-convoy-tracker-frontend .
+#
+# RUST_VERSION MUST BE >= 1.85 -- the workspace is edition 2024.
+# ==============================================================================
+
+# -----------------------------------------------------------------------------
+# Stage 1: Build WASM
+# -----------------------------------------------------------------------------
+ARG RUST_VERSION=1.89
+FROM docker.io/library/rust:${RUST_VERSION}-slim-bookworm AS builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Trunk and wasm-bindgen
+RUN cargo install trunk wasm-bindgen-cli
+
+# Add WASM target
+RUN rustup target add wasm32-unknown-unknown
+
+WORKDIR /app
+
+# Copy workspace files
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+
+# Build frontend
+WORKDIR /app/crates/drone-frontend
+RUN trunk build --release
+
+# -----------------------------------------------------------------------------
+# Stage 2: Nginx Runtime
+# -----------------------------------------------------------------------------
+FROM docker.io/library/nginx:1.27-alpine AS runtime
+
+# Copy nginx config
+COPY containers/nginx.conf /etc/nginx/nginx.conf
+
+# Copy built assets
+COPY --from=builder /app/crates/drone-frontend/dist /usr/share/nginx/html
+
+# Security headers
+RUN echo 'add_header X-Frame-Options "SAMEORIGIN" always;' >> /etc/nginx/conf.d/security.conf && \
+    echo 'add_header X-Content-Type-Options "nosniff" always;' >> /etc/nginx/conf.d/security.conf && \
+    echo 'add_header X-XSS-Protection "1; mode=block" always;' >> /etc/nginx/conf.d/security.conf
+
+EXPOSE 80
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost/ || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]
