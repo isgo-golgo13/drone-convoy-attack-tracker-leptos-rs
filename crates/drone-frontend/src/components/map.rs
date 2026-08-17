@@ -124,6 +124,9 @@ extern "C" {
     #[wasm_bindgen(method, js_name = bindPopup)]
     fn bind_popup(this: &Marker, content: &str) -> Marker;
 
+    #[wasm_bindgen(method, js_name = on)]
+    fn marker_on(this: &Marker, event: &str, handler: &js_sys::Function) -> Marker;
+
     #[wasm_bindgen(method, js_name = setLatLng)]
     fn set_lat_lng(this: &Marker, lat_lng: &JsValue);
 
@@ -364,14 +367,25 @@ pub fn MapPanel() -> impl IntoView {
                     ordered.sort_by(|a, b| a.callsign.cmp(&b.callsign));
 
                     let mut known = markers.borrow_mut();
+                    let live = state.live_positions.get_untracked();
                     for drone in &ordered {
                         let accent = status_accent(&drone.status);
+                        // Popup carries the SAME live ALT/HDG the bottom-right
+                        // readout shows, so a clicked airframe and the readout
+                        // can never disagree.
+                        let (alt, hdg) = live
+                            .get(&drone.drone_id)
+                            .map(|p| (p.altitude_m, p.heading_deg))
+                            .unwrap_or((drone.position.altitude_m, drone.position.heading_deg));
                         let popup = format!(
                             "<div style='font-family: monospace; color: #00ff41; background: #0a0f0d; \
-                             padding: 8px; border: 1px solid #00ff41;'>\
-                             <b>{}</b><br/><span style='color:#557755;'>FUEL:</span> {:.0}%\
-                             <br/><span style='color:#557755;'>ACC:</span> {:.1}%</div>",
-                            drone.callsign, drone.fuel_pct, drone.accuracy_pct
+                             padding: 8px; border: 1px solid #00ff41; white-space: nowrap;'>\
+                             <b>{}</b>\
+                             <br/><span style='color:#557755;'>FUEL:</span> {:.0}%\
+                             <br/><span style='color:#557755;'>ACC:</span>  {:.1}%\
+                             <br/><span style='color:#557755;'>ALT:</span>  {:.0} m\
+                             <br/><span style='color:#557755;'>HDG:</span>  {:03.0}°</div>",
+                            drone.callsign, drone.fuel_pct, drone.accuracy_pct, alt, hdg
                         );
 
                         if let Some((_, marker)) =
@@ -403,6 +417,21 @@ pub fn MapPanel() -> impl IntoView {
                         let marker = create_marker(&lat_lng(ip.0, ip.1), &opts.into());
                         marker.bind_popup(&popup);
                         marker.marker_add_to(&map);
+
+                        // Clicking an airframe SELECTS it app-wide -- the
+                        // bottom-right readout switches to it and its card
+                        // highlights -- so the map, the readout and the cards
+                        // are one selection, not three. Toggle on re-click.
+                        {
+                            let id = drone.drone_id;
+                            let on_click = Closure::wrap(Box::new(move || {
+                                state.selected_drone.update(|sel| {
+                                    *sel = if *sel == Some(id) { None } else { Some(id) };
+                                });
+                            }) as Box<dyn Fn()>);
+                            marker.marker_on("click", on_click.as_ref().unchecked_ref());
+                            on_click.forget(); // lives as long as the marker
+                        }
 
                         // Insert in callsign order so the formation slot is
                         // deterministic no matter the join order.
