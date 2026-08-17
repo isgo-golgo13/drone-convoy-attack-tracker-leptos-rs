@@ -626,8 +626,8 @@ pub fn MapPanel() -> impl IntoView {
                 // ONE HUD strip. Segment 1: the AOR being viewed. Segment 2
                 // (only when the sim is flying elsewhere): the truth-guard
                 // warning with the exact command. One dark bar, no stacking.
-                <div class="map-strip">
-                    <div class="map-strip-seg">
+                <div class="map-hud">
+                    <div class="map-hud-row aor">
                         <span class="status-dot nominal"></span>
                         {move || state.selected_theater.get().theater().aor}
                     </div>
@@ -636,11 +636,11 @@ pub fn MapPanel() -> impl IntoView {
                         flown_theater(&state.drones.get())
                             .filter(|f| *f != viewed)
                             .map(|f| view! {
-                                <div class="map-strip-seg warn">
-                                    <span class="status-dot warning"></span>
-                                    <span class="warn-text">
-                                        {format!("NO AIRFRAMES HERE — SIM IS FLYING {}", f.theater().label)}
-                                    </span>
+                                <div class="map-hud-row warn">
+                                    <div class="warn-line">
+                                        <span class="status-dot warning"></span>
+                                        {format!("NO AIRFRAMES — SIM FLYING {}", f.theater().label)}
+                                    </div>
                                     <code>{format!("make run-simulator THEATER={}", viewed.slug())}</code>
                                 </div>
                             })
