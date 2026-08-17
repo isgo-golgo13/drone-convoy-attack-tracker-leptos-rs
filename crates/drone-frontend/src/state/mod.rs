@@ -33,6 +33,9 @@ pub struct AppState {
     /// not yet reported from there. Cleared by the map when the server's
     /// positions arrive in the new theater. Drives the RETASKING indicator.
     pub retasking: RwSignal<Option<crate::components::regions::TheaterId>>,
+    /// Last tasking order the API rejected (message), shown on the HUD card
+    /// so a failure is never silent. Cleared on the next order.
+    pub retask_error: RwSignal<Option<String>>,
     pub ws_connected: RwSignal<bool>,
     pub mission_start: RwSignal<Option<DateTime<Utc>>>,
     pub alerts: RwSignal<Vec<Alert>>,
@@ -50,6 +53,7 @@ impl AppState {
             selected_theater: RwSignal::new(crate::components::regions::TheaterId::default()),
             live_positions: RwSignal::new(HashMap::new()),
             retasking: RwSignal::new(None),
+            retask_error: RwSignal::new(None),
             ws_connected: RwSignal::new(false),
             mission_start: RwSignal::new(None),
             alerts: RwSignal::new(Vec::new()),

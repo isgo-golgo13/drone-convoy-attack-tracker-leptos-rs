@@ -73,14 +73,20 @@ pub fn Header() -> impl IntoView {
                 primed.set_value(true);
                 return;
             }
-            let Some(convoy_id) = state.selected_convoy.get_untracked() else { return };
+            let Some(convoy_id) = state.selected_convoy.get_untracked() else {
+                log::warn!("retask -> {}: no convoy selected yet, order not sent", theater.slug());
+                return;
+            };
+            log::info!("tasking order: convoy {} -> {}", convoy_id, theater.slug());
             state.retasking.set(Some(theater));
+            state.retask_error.set(None);
             leptos::task::spawn_local(async move {
                 match crate::services::retask_convoy(convoy_id, theater.slug()).await {
-                    Ok(()) => log::info!("retask -> {}", theater.slug()),
+                    Ok(()) => log::info!("tasking order accepted -> {}", theater.slug()),
                     Err(e) => {
-                        log::error!("retask failed: {e}");
+                        log::error!("tasking order REJECTED: {e}");
                         state.retasking.set(None);
+                        state.retask_error.set(Some(e));
                     }
                 }
             });

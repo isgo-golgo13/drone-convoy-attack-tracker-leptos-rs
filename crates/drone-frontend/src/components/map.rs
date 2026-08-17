@@ -646,8 +646,7 @@ pub fn MapPanel() -> impl IntoView {
                         let pending = state.retasking.get().is_some()
                             || matches!(flown, Some(f) if f != viewed);
                         let label = match flown {
-                            Some(f) if f != viewed =>
-                                format!("RETASKING — CONVOY EN ROUTE FROM {}", f.theater().label),
+                            Some(f) if f != viewed => format!("RETASKING FROM {}", f.theater().label),
                             _ => "RETASKING — AWAITING CONVOY".to_string(),
                         };
                         pending.then(|| view! {
@@ -657,6 +656,13 @@ pub fn MapPanel() -> impl IntoView {
                             </div>
                         })
                     }}
+                    // A rejected tasking order is shown, not swallowed.
+                    {move || state.retask_error.get().map(|e| view! {
+                        <div class="map-hud-row error">
+                            <span class="status-dot critical"></span>
+                            {format!("TASKING REJECTED: {e}")}
+                        </div>
+                    })}
                 </div>
                 {move || drone_position().map(|pos| view! {
                     <div class="map-control">
