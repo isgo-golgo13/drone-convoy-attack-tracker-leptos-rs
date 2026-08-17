@@ -199,6 +199,9 @@ help:
 	@printf "  $(BLUE)make touch$(NC)    restamp source mtimes (build runs this for you)\n"
 	@printf "\n"
 	@printf "  $(YELLOW)make stack-up$(NC)  everything in containers instead (needs podman-compose)\n"
+	@printf "  $(YELLOW)make kind-up$(NC)   3+3 KinD cluster w/ Cilium Gateway API + all operators\n"
+	@printf "  $(YELLOW)make kind-deploy$(NC) helm install the chart into it -> https://drone.localtest.me\n"
+	@printf "  $(YELLOW)make kind-down$(NC) delete the KinD cluster\n"
 	@printf "  $(YELLOW)make help-all$(NC)  full target list\n"
 	@printf "\n"
 
@@ -603,3 +606,52 @@ ci: check-deps lint test build
 .PHONY: ci-full
 ci-full: ci audit image
 	@printf "$(GREEN)✓ Full CI pipeline complete$(NC)\n"
+
+# =============================================================================
+# KUBERNETES -- KinD cluster + Helm chart (deploy/kubernetes, deploy/cluster)
+# =============================================================================
+CHART      := deploy/kubernetes/drone-convoy-attack-tracker
+KIND_NS    ?= drone-ops
+KIND_ENV   ?= nonprod
+
+# The chart's schema-init hook needs the CQL files INSIDE the chart directory
+# (Helm .Files cannot read outside it). schema/cql/ stays the single source of
+# truth; this copies it in before any render/package and is gitignored there.
+.PHONY: chart-sync
+chart-sync:
+	@mkdir -p $(CHART)/schema/cql && cp schema/cql/*.cql $(CHART)/schema/cql/
+
+.PHONY: chart-lint
+chart-lint: chart-sync
+	helm lint $(CHART) -f $(CHART)/values-$(KIND_ENV).yaml
+
+.PHONY: chart-template
+chart-template: chart-sync
+	helm template drone $(CHART) -n $(KIND_NS) -f $(CHART)/values-$(KIND_ENV).yaml
+
+.PHONY: kind-up
+kind-up:
+	@bash deploy/cluster/kind-bootstrap.sh
+
+.PHONY: kind-load
+kind-load: images
+	kind load docker-image $(IMAGE_REGISTRY)/$(PROJECT_NAME)-api:latest --name drone-ops
+	kind load docker-image $(IMAGE_REGISTRY)/$(PROJECT_NAME)-frontend:latest --name drone-ops
+
+.PHONY: kind-deploy
+kind-deploy: chart-sync
+	helm upgrade --install drone $(CHART) -n $(KIND_NS) --create-namespace \
+		-f $(CHART)/values-$(KIND_ENV).yaml \
+		--set image.registry=$(IMAGE_REGISTRY) \
+		--set image.api.repository=$(PROJECT_NAME)-api --set image.api.tag=latest \
+		--set image.frontend.repository=$(PROJECT_NAME)-frontend --set image.frontend.tag=latest \
+		--wait --timeout 15m
+	@bash deploy/cluster/kind-expose.sh $(KIND_NS) drone-gateway
+
+.PHONY: kind-status
+kind-status:
+	kubectl -n $(KIND_NS) get gateway,httproute,certificate,externalsecret,scyllacluster,hpa,vpa,pods
+
+.PHONY: kind-down
+kind-down:
+	kind delete cluster --name drone-ops

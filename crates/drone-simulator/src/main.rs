@@ -40,9 +40,15 @@ struct Args {
     #[arg(short, long, default_value = "4")]
     drones: usize,
 
-    /// API endpoint
-    #[arg(long, default_value = "http://localhost:8080/graphql")]
+    /// API endpoint (also DRONE_API_URL). Point it at the Gateway when the
+    /// stack runs in Kubernetes: https://drone.localtest.me/graphql
+    #[arg(long, env = "DRONE_API_URL", default_value = "http://localhost:8080/graphql")]
     api_url: String,
+
+    /// Accept self-signed TLS (also DRONE_INSECURE_TLS=1). For KinD, where the
+    /// Gateway certificate comes from a self-signed ClusterIssuer. Never in prod.
+    #[arg(long, env = "DRONE_INSECURE_TLS", default_value_t = false)]
+    insecure_tls: bool,
 
     /// Tick interval in milliseconds
     #[arg(long, default_value = "1000")]
@@ -72,7 +78,13 @@ async fn main() -> Result<()> {
     );
 
     let mut convoy = ConvoySimulator::new(&args.callsign, &args.mission, args.drones);
-    let client = Client::new();
+    let client = Client::builder()
+        .danger_accept_invalid_certs(args.insecure_tls)
+        .build()
+        .expect("reqwest client");
+    if args.insecure_tls {
+        warn!("TLS certificate verification DISABLED (--insecure-tls) -- local KinD only");
+    }
     let progress_per_tick = 1.0 / args.duration as f64;
 
     info!("Convoy ID: {}", convoy.convoy_id);
