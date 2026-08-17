@@ -638,7 +638,8 @@ pub fn MapPanel() -> impl IntoView {
                         .map(|f| view! {
                             <div class="map-control map-control-warn">
                                 <span class="status-dot warning"></span>
-                                {format!("SIM FLYING {} — restart with --theater {}", f.theater().label, viewed.slug())}
+                                {format!("NO AIRFRAMES HERE — SIM IS FLYING {} · run ", f.theater().label)}
+                                <code>{format!("make run-simulator THEATER={}", viewed.slug())}</code>
                             </div>
                         })
                 }}
