@@ -249,6 +249,10 @@ make build          # touch sweep + full workspace build (API, frontend, simulat
 make serve          # starts ScyllaDB+Redis (podman), applies schema, runs API
                     #   (release) + Trunk dev server natively
 make run-simulator  # second terminal: flies the ALPHA convoy for one mission
+
+OR
+
+make run-simulator THEATER=syria → pick SYRIA in the header
 ```
 
 Dashboard at `http://localhost:3000`, GraphQL playground at
