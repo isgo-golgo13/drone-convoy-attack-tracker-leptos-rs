@@ -130,7 +130,7 @@ serve: deps-up
 # tasking yet; the dashboard is the commander from then on.
 .PHONY: serve-sim
 serve-sim:
-	@DRONE_SERVICE=1 DRONE_THEATER=$(THEATER) $(CARGO) run --release --package drone-simulator
+	@DRONE_SERVICE=true DRONE_THEATER=$(THEATER) $(CARGO) run --release --package drone-simulator
 
 .PHONY: serve-api
 serve-api:

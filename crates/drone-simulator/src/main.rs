@@ -58,7 +58,8 @@ struct Args {
     /// THEATER selector -> retaskConvoy mutation), the NEXT sortie flies the
     /// new theater. Without this flag: one sortie in --theater, then exit
     /// (the original behavior, kept for dev).
-    #[arg(long, env = "DRONE_SERVICE", default_value_t = false)]
+    #[arg(long, env = "DRONE_SERVICE", default_value_t = false,
+          value_parser = parse_bool_env, num_args = 0..=1, default_missing_value = "true")]
     service: bool,
 
     /// In service mode, how often (ticks) to check the tasking order MID-
@@ -69,7 +70,8 @@ struct Args {
 
     /// Accept self-signed TLS (also DRONE_INSECURE_TLS=1). For KinD, where the
     /// Gateway certificate comes from a self-signed ClusterIssuer. Never in prod.
-    #[arg(long, env = "DRONE_INSECURE_TLS", default_value_t = false)]
+    #[arg(long, env = "DRONE_INSECURE_TLS", default_value_t = false,
+          value_parser = parse_bool_env, num_args = 0..=1, default_missing_value = "true")]
     insecure_tls: bool,
 
     /// Tick interval in milliseconds
@@ -291,6 +293,17 @@ async fn read_tasking(client: &Client, api_url: &str, convoy_id: uuid::Uuid) -> 
     let v: Value = resp.json().await.ok()?;
     let name = v.pointer("/data/convoy/aorName")?.as_str()?;
     drone_domain::TheaterId::from_slug(name)
+}
+
+/// Lenient boolean for env-backed flags: true/false, 1/0, yes/no, on/off.
+/// clap's default bool parser accepts only "true"/"false", which is a
+/// surprising trap for `DRONE_SERVICE=1` in a Makefile or shell.
+fn parse_bool_env(s: &str) -> std::result::Result<bool, String> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" | "" => Ok(false),
+        other => Err(format!("expected true/false (or 1/0, yes/no, on/off), got '{other}'")),
+    }
 }
 
 // =============================================================================
