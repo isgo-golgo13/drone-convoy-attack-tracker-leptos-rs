@@ -623,27 +623,29 @@ pub fn MapPanel() -> impl IntoView {
             <div id=map_id class="leaflet-map"></div>
 
             <div class="map-overlay">
-                <div class="map-control">
-                    <span class="status-dot nominal"></span>
-                    {move || state.selected_theater.get().theater().aor}
+                // ONE HUD strip. Segment 1: the AOR being viewed. Segment 2
+                // (only when the sim is flying elsewhere): the truth-guard
+                // warning with the exact command. One dark bar, no stacking.
+                <div class="map-strip">
+                    <div class="map-strip-seg">
+                        <span class="status-dot nominal"></span>
+                        {move || state.selected_theater.get().theater().aor}
+                    </div>
+                    {move || {
+                        let viewed = state.selected_theater.get();
+                        flown_theater(&state.drones.get())
+                            .filter(|f| *f != viewed)
+                            .map(|f| view! {
+                                <div class="map-strip-seg warn">
+                                    <span class="status-dot warning"></span>
+                                    <span class="warn-text">
+                                        {format!("NO AIRFRAMES HERE — SIM IS FLYING {}", f.theater().label)}
+                                    </span>
+                                    <code>{format!("make run-simulator THEATER={}", viewed.slug())}</code>
+                                </div>
+                            })
+                    }}
                 </div>
-                // Truth guard: the airframes fly SERVER positions. If the
-                // simulator is flying a different theater than the one being
-                // viewed, say so instead of drawing drones onto pins they are
-                // not on. Restart the sim with --theater <slug> to match.
-                {move || {
-                    let viewed = state.selected_theater.get();
-                    flown_theater(&state.drones.get())
-                        .filter(|f| *f != viewed)
-                        .map(|f| view! {
-                            <div class="map-control map-control-warn">
-                                <span class="status-dot warning"></span>
-                                {format!("NO AIRFRAMES HERE — SIM IS FLYING {} · run ", f.theater().label)}
-                                <code>{format!("make run-simulator THEATER={}", viewed.slug())}</code>
-                            </div>
-                        })
-                }}
-
                 {move || drone_position().map(|pos| view! {
                     <div class="map-control">
                         <span class="text-accent">"SEL:"</span>

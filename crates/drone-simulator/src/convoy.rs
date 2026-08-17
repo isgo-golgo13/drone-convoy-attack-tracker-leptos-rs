@@ -13,6 +13,10 @@ pub struct SimulatedDrone {
     pub drone_id: Uuid,
     pub callsign: String,
     pub platform_type: String,
+    /// Formation slot (0 = lead). Each successive slot flies the same route a
+    /// fixed fraction of the mission BEHIND the one ahead — line astern — so
+    /// four drones on one track are four visibly distinct positions.
+    pub slot: usize,
     pub waypoints: Vec<Waypoint>,
     pub telemetry_gen: TelemetryGenerator,
     pub engagement_sim: EngagementSimulator,
@@ -34,8 +38,13 @@ impl SimulatedDrone {
         // exactly what a random v4 here did across restarts.
         let drone_id = Uuid::new_v5(&Uuid::NAMESPACE_OID, callsign.as_bytes());
         let mut flight_gen = FlightPathGenerator::for_theater(theater);
-        // Alternate sides of the track: 0, +250 m, -250 m, +500 m, ...
-        let spread_m = ((slot as f64 + 1.0) / 2.0).floor() * 250.0 * if slot % 2 == 1 { 1.0 } else { -1.0 };
+        // Lateral offset alternates sides of the track and scales with the
+        // theater: ~0.6% of the AOR radius per step (Kandahar 150 km -> 900 m,
+        // Syria 160 km -> 960 m, Libya 200 km -> 1.2 km) so the formation is
+        // legible at each theater's zoom, and each card's GPS is visibly its
+        // own. Sub-pixel spread was the "only one drone in Syria" report.
+        let step_m = theater.aor_radius_m * 0.006;
+        let spread_m = ((slot as f64 + 1.0) / 2.0).floor() * step_m * if slot % 2 == 1 { 1.0 } else { -1.0 };
         let waypoints = flight_gen.generate_route_path(theater.route, spread_m);
         let telemetry_gen = TelemetryGenerator::new(drone_id, callsign, waypoints.clone());
 
@@ -43,6 +52,7 @@ impl SimulatedDrone {
             drone_id,
             callsign: callsign.to_string(),
             platform_type: platform_type.to_string(),
+            slot,
             waypoints,
             telemetry_gen,
             engagement_sim: EngagementSimulator::new(),
@@ -161,12 +171,23 @@ impl ConvoySimulator {
         }
     }
 
-    /// Generate telemetry for all drones.
+    /// Along-track spacing between formation slots, as a fraction of the
+    /// mission. 2% ≈ 6 s at the default 300 s sortie, ≈ one-quarter of a leg
+    /// on the 12-14 point routes: line astern, never overlapping, and the
+    /// whole formation still completes the sortie (the trail drone is
+    /// clamped to the final waypoint for its last few seconds).
+    pub const FORMATION_STAGGER: f64 = 0.02;
+
+    /// Generate telemetry for all drones — each slot trails the lead by
+    /// `slot × FORMATION_STAGGER` of the mission along the SAME route.
     pub fn generate_telemetry(&mut self) -> Vec<TelemetrySnapshot> {
         let progress = self.mission_progress;
         self.drones
             .values_mut()
-            .filter_map(|drone| drone.telemetry_gen.next_snapshot(progress))
+            .filter_map(|drone| {
+                let p = (progress - drone.slot as f64 * Self::FORMATION_STAGGER).clamp(0.0, 1.0);
+                drone.telemetry_gen.next_snapshot(p)
+            })
             .collect()
     }
 
